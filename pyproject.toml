@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elevator-sim"
+version = "0.1.0"
+description = "Discrete-time elevator simulation for strategy analysis"
+authors = [{ name = "Simulation Team" }]
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["simulation", "elevator", "operations"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Simulation",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
