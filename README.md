@@ -40,7 +40,7 @@ The project targets Python 3.10 or newer. Create a virtual environment and insta
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+.venv\Scripts\activate
 pip install -e .
 ```
 
@@ -55,11 +55,7 @@ pip install -e .[dev]
 Use the CLI to execute batch experiments. The command below runs both bundled strategies against the `highrise_commuter` scenario, repeating each three times and writing CSV outputs into `results/`:
 
 ```bash
-python scripts/run_simulation.py \
-  --config configs/highrise_commuter.json \
-  --runs-per-strategy 3 \
-  --output-dir results \
-  --export-json results/summary.json
+python scripts/run_simulation.py --config configs/highrise_commuter.json --runs-per-strategy 3 --output-dir results --export-json results/summary.json
 ```
 
 After running you will find:
