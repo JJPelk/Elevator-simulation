@@ -43,6 +43,7 @@ def passenger_rows(strategy: str, run_index: int, passengers: Iterable[Passenger
             "system_time": passenger.system_time,
             "assigned_elevator": passenger.assigned_elevator,
             "completed": passenger.completed(),
+            "event": passenger.metadata.get("event", False),
         }
 
 
@@ -53,13 +54,25 @@ def metric_row(strategy: str, run_index: int, metrics: MetricResult, total_energ
         "average_wait": metrics.average_wait,
         "median_wait": metrics.median_wait,
         "pct90_wait": metrics.pct90_wait,
+        "max_wait": metrics.max_wait,
+        "std_wait": metrics.std_wait,
         "average_travel": metrics.average_travel,
+        "median_travel": metrics.median_travel,
+        "std_travel": metrics.std_travel,
         "average_system": metrics.average_system,
         "gini_wait": metrics.gini_wait,
         "throughput": metrics.throughput,
         "total_passengers": metrics.total_passengers,
         "unfinished_passengers": metrics.unfinished_passengers,
+        "completion_ratio": metrics.completion_ratio,
         "total_energy": total_energy,
+        "energy_per_passenger": metrics.energy_per_passenger,
+        "distance_per_passenger": metrics.distance_per_passenger,
+        "average_occupancy": metrics.average_occupancy,
+        "idle_fraction": metrics.idle_fraction,
+        "moving_fraction": metrics.moving_fraction,
+        "boarding_fraction": metrics.boarding_fraction,
+        "empty_trip_fraction": metrics.empty_trip_fraction,
     }
 
 
@@ -86,7 +99,12 @@ def run_cli() -> None:
     args = parser.parse_args()
 
     config = load_config(args.config)
-    strategies = args.strategies or ["collective_control", "destination_dispatch"]
+    strategies = args.strategies or [
+        "collective_control",
+        "destination_dispatch",
+        "zoned_dispatch",
+        "energy_saver",
+    ]
 
     results = run_batch(config, strategies, runs_per_strategy=args.runs_per_strategy)
 
@@ -104,13 +122,25 @@ def run_cli() -> None:
                 "average_wait",
                 "median_wait",
                 "pct90_wait",
+                "max_wait",
+                "std_wait",
                 "average_travel",
+                "median_travel",
+                "std_travel",
                 "average_system",
                 "gini_wait",
                 "throughput",
                 "total_passengers",
                 "unfinished_passengers",
+                "completion_ratio",
                 "total_energy",
+                "energy_per_passenger",
+                "distance_per_passenger",
+                "average_occupancy",
+                "idle_fraction",
+                "moving_fraction",
+                "boarding_fraction",
+                "empty_trip_fraction",
             ],
         )
         writer.writeheader()
@@ -132,6 +162,7 @@ def run_cli() -> None:
             "system_time",
             "assigned_elevator",
             "completed",
+            "event",
         ]
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
@@ -140,7 +171,23 @@ def run_cli() -> None:
                 writer.writerow(row)
 
     with elevator_path.open("w", newline="", encoding="utf-8") as fh:
-        fieldnames = ["strategy", "run_index", "elevator_id", "distance_travelled", "stops", "energy", "passengers_moved"]
+        fieldnames = [
+            "strategy",
+            "run_index",
+            "elevator_id",
+            "distance_travelled",
+            "active_distance",
+            "empty_distance",
+            "active_empty_distance",
+            "stops",
+            "energy",
+            "active_energy",
+            "time_idle",
+            "time_moving",
+            "time_boarding",
+            "occupancy_time",
+            "passengers_moved",
+        ]
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         for result in results:

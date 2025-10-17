@@ -26,6 +26,14 @@ class ElevatorState:
     total_distance: float = 0.0
     total_stops: int = 0
     total_energy: float = 0.0
+    active_distance: float = 0.0
+    active_energy: float = 0.0
+    empty_distance: float = 0.0
+    active_empty_distance: float = 0.0
+    time_idle: float = 0.0
+    time_moving: float = 0.0
+    time_boarding: float = 0.0
+    occupancy_time: float = 0.0
 
     def is_idle(self) -> bool:
         return self.mode == ElevatorMode.IDLE and not self.pending_stops and self.target_floor is None

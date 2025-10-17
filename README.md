@@ -5,10 +5,13 @@ This repository contains a configurable elevator simulation engine designed to g
 ## Key Features
 
 - **Discrete-time simulation core** with per-second resolution, configurable elevator dynamics, and stochastic passenger arrivals.
-- **Two dispatch strategies** ready for comparison:
+- **Four dispatch strategies** ready for comparison:
   - `collective_control`: a nearest-car collective control algorithm that serves hall calls while respecting travel direction.
   - `destination_dispatch`: a destination-grouping controller that forms elevator assignments based on passenger destinations.
-- **Comprehensive metrics** including averages and percentiles for wait/travel times, throughput, fairness (Gini coefficient), and energy consumption estimates.
+  - `zoned_dispatch`: dedicates elevators to building zones while sharing overloads to study fairness across high-rise stacks.
+  - `energy_saver`: batches passengers to reduce empty travel and quantify energy-saving behaviour.
+- **Comprehensive metrics** including averages, medians, and extreme wait statistics, fairness (Gini and completion ratio), energy-per-passenger, occupancy and mode-time fractions, and empty-trip ratios for energy analysis.
+- **Arrival window + burst modelling** allowing both Poisson arrivals and scheduled crowd events for lunch rushes, conferences, or evacuation drills.
 - **Passenger-level datasets** capturing request, boarding, and exit times for every simulated rider.
 - **Batch experimentation CLI** to run multiple scenarios, export CSV summaries, and serialise complete results to JSON.
 - **Extensible architecture** that allows new strategies or arrival profiles to be plugged in via Python.
@@ -30,7 +33,9 @@ This repository contains a configurable elevator simulation engine designed to g
 │   └── strategy/              # Dispatch strategy implementations
 │       ├── base.py
 │       ├── collective.py
-│       └── destination_dispatch.py
+│       ├── destination_dispatch.py
+│       ├── energy_saver.py
+│       └── zoned.py
 └── tests/                     # Unit and integration tests
 ```
 
@@ -40,7 +45,7 @@ The project targets Python 3.10 or newer. Create a virtual environment and insta
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
+source .venv/bin/activate
 pip install -e .
 ```
 
@@ -52,17 +57,21 @@ pip install -e .[dev]
 
 ## Running Simulations
 
-Use the CLI to execute batch experiments. The command below runs both bundled strategies against the `highrise_commuter` scenario, repeating each three times and writing CSV outputs into `results/`:
+Use the CLI to execute batch experiments. The command below runs all bundled strategies against the `highrise_commuter` scenario, repeating each three times and writing CSV outputs into `results/`:
 
 ```bash
-python scripts/run_simulation.py --config configs/highrise_commuter.json --runs-per-strategy 3 --output-dir results --export-json results/summary.json
+python scripts/run_simulation.py \
+  --config configs/highrise_commuter.json \
+  --runs-per-strategy 3 \
+  --output-dir results \
+  --export-json results/summary.json
 ```
 
 After running you will find:
 
-- `summary.csv` – aggregated metrics per strategy and run.
+- `summary.csv` – aggregated metrics per strategy and run (wait-time distribution, fairness, energy intensity, utilisation fractions, etc.).
 - `passengers.csv` – passenger-level records for downstream analysis (e.g., plotting distributions).
-- `elevators.csv` – per-elevator utilisation and energy summaries.
+- `elevators.csv` – per-elevator utilisation and energy summaries including distance splits, idle/moving/boarding time, and occupancy-hours.
 - `summary.json` – the raw structured output (optional).
 
 ## Configuration Reference
@@ -72,23 +81,27 @@ Simulation behaviour is governed by `SimulationConfig` (see `src/elevator_sim/co
 - `num_floors`, `num_elevators`: building topology.
 - `duration_s`, `warmup_s`: total runtime and warmup period to discard initial transients.
 - `elevator`: nested settings for capacity, travel time per floor, door timing, boarding time, energy model, and optional idle parking floors.
-- `arrivals`: a list of time windows describing per-floor arrival rates for upward and downward passengers (rates expressed as passengers per minute).
+- `arrivals`: a list of time windows describing per-floor arrival rates for upward and downward passengers (rates expressed as passengers per minute) plus optional `events` for scripted bursts.
 - `random_seed`: ensures reproducible stochastic behaviour.
 
 The provided `configs/highrise_commuter.json` showcases a three-phase workday profile (morning up-peak, midday balance, evening down-peak) across 20 floors and four elevators.
 
 ## Output Data
 
-Each passenger entry includes request/board/exit timestamps, wait and travel durations, assigned elevator, and completion status. The summary table reports:
+Each passenger entry includes request/board/exit timestamps, wait and travel durations, assigned elevator, completion status, and whether the rider came from a scripted event. The summary table reports:
 
-- Average, median, and 90th percentile wait times.
-- Average travel and total system times.
-- Gini coefficient of wait-time distribution as a fairness indicator.
-- Throughput (passengers per simulated second).
-- Total passengers served and unfinished riders.
-- Estimated total energy use per strategy.
+- Average, median, 90th percentile, maximum, and standard deviation of wait times.
+- Average and median travel times plus variability statistics.
+- Total system time, throughput (passengers per simulated second), and completion ratio.
+- Fairness and equity metrics (Gini coefficient, unfinished passengers).
+- Energy and efficiency metrics (total energy, per-passenger energy and distance, empty-trip fraction).
+- Utilisation breakdowns (average occupancy and the fraction of time elevators spend idle, moving, or boarding).
 
-Per-elevator telemetry records distance travelled, number of stops, energy consumption, and passengers moved, enabling additional analyses such as workload balancing.
+Per-elevator telemetry records gross/operational distance, empty distance, energy consumption, time-in-mode breakdowns, and passengers moved—ideal for workload-balancing or energy-intensity studies.
+
+### Arrival Events
+
+In addition to Poisson arrivals, you can schedule deterministic bursts using the `events` array within `PassengerArrivalConfig`. Each event specifies `time_s`, `floor`, `direction`, `count`, and optional `destinations`. This enables scenarios such as fire drills, conference dismissals, or class changes. Event passengers are tagged in the passenger export (`event` column) for easy post-processing.
 
 ## Testing
 

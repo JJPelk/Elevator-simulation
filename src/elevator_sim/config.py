@@ -22,10 +22,22 @@ class PassengerArrivalConfig:
     """Configures the stochastic passenger arrival process."""
 
     windows: List[ArrivalWindow]
+    events: List["ArrivalEvent"] = field(default_factory=list)
 
     @property
     def max_floor(self) -> int:
         return len(self.windows[0].up_rate_per_minute)
+
+
+@dataclass
+class ArrivalEvent:
+    """Represents a scheduled burst of passengers."""
+
+    time_s: int
+    floor: int
+    direction: int
+    count: int
+    destinations: Optional[List[int]] = None
 
 
 @dataclass
@@ -60,6 +72,17 @@ class SimulationConfig:
                     raise ValueError("Arrival window up rates must match num floors")
                 if len(window.down_rate_per_minute) != self.num_floors:
                     raise ValueError("Arrival window down rates must match num floors")
+            for event in self.arrivals.events:
+                if not 0 <= event.floor < self.num_floors:
+                    raise ValueError("Arrival event floor must be within building range")
+                if event.direction not in (-1, 1):
+                    raise ValueError("Arrival event direction must be -1 or 1")
+                if event.destinations:
+                    for dest in event.destinations:
+                        if not 0 <= dest < self.num_floors:
+                            raise ValueError("Arrival event destination out of range")
+                        if dest == event.floor:
+                            raise ValueError("Arrival event destination cannot equal origin floor")
 
     @classmethod
     def from_dict(cls, data: Dict) -> "SimulationConfig":
@@ -76,7 +99,17 @@ class SimulationConfig:
                 )
                 for window in arrivals_cfg.get("windows", [])
             ]
-            arrivals = PassengerArrivalConfig(windows=windows)
+            events = [
+                ArrivalEvent(
+                    time_s=event["time_s"],
+                    floor=event["floor"],
+                    direction=event.get("direction", 1),
+                    count=event["count"],
+                    destinations=event.get("destinations"),
+                )
+                for event in arrivals_cfg.get("events", [])
+            ]
+            arrivals = PassengerArrivalConfig(windows=windows, events=events)
         else:
             arrivals = None
 

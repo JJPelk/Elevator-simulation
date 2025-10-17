@@ -164,6 +164,45 @@
           0.3
         ]
       }
+    ],
+    "events": [
+      {
+        "time_s": 2100,
+        "floor": 0,
+        "direction": 1,
+        "count": 40,
+        "destinations": [
+          12,
+          15,
+          18,
+          19
+        ]
+      },
+      {
+        "time_s": 3600,
+        "floor": 10,
+        "direction": -1,
+        "count": 30,
+        "destinations": [
+          0,
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      {
+        "time_s": 4500,
+        "floor": 19,
+        "direction": -1,
+        "count": 25,
+        "destinations": [
+          0,
+          5,
+          10,
+          15
+        ]
+      }
     ]
   }
 }

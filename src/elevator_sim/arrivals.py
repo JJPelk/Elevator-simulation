@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
-from typing import Iterator, List, Sequence
+from dataclasses import dataclass, field
+from typing import Dict, Iterator, List, Sequence
 
-from .config import PassengerArrivalConfig
+from .config import ArrivalEvent, PassengerArrivalConfig
 from .passenger import Passenger
 
 
@@ -15,6 +15,13 @@ class PassengerArrivalProcess:
 
     config: PassengerArrivalConfig
     random_state: random.Random
+    _events_by_time: Dict[int, List[ArrivalEvent]] = field(init=False, default_factory=dict)
+
+    def __post_init__(self) -> None:
+        events: Dict[int, List[ArrivalEvent]] = {}
+        for event in self.config.events:
+            events.setdefault(event.time_s, []).append(event)
+        self._events_by_time = events
 
     def generate(self, current_time: int) -> Iterator[Passenger]:
         window = self._window_for_time(current_time)
@@ -43,6 +50,9 @@ class PassengerArrivalProcess:
                     valid_destinations=range(0, floor),
                 )
             )
+        if current_time in self._events_by_time:
+            for event in self._events_by_time[current_time]:
+                passengers.extend(self._spawn_event_passengers(current_time, event))
         return iter(passengers)
 
     def _spawn_passengers(
@@ -68,6 +78,32 @@ class PassengerArrivalProcess:
                     destination=dest,
                     request_time=float(current_time),
                     direction=direction,
+                )
+            )
+        return passengers
+
+    def _spawn_event_passengers(
+        self, current_time: int, event: ArrivalEvent
+    ) -> List[Passenger]:
+        valid_destinations: Sequence[int]
+        if event.direction == 1:
+            valid_destinations = range(event.floor + 1, self.config.max_floor)
+        else:
+            valid_destinations = range(0, event.floor)
+        destinations = event.destinations or list(valid_destinations)
+        if not destinations:
+            return []
+        passengers: List[Passenger] = []
+        for _ in range(event.count):
+            dest = self.random_state.choice(destinations)
+            passengers.append(
+                Passenger(
+                    passenger_id=-1,
+                    origin=event.floor,
+                    destination=dest,
+                    request_time=float(current_time),
+                    direction=event.direction,
+                    metadata={"event": True},
                 )
             )
         return passengers

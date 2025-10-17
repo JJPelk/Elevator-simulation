@@ -23,6 +23,7 @@ class SimulationResult:
     metrics: MetricResult
     elevator_stats: List[Dict[str, float]]
     total_energy: float
+    total_distance: float
     run_index: int = 0
 
     def to_dict(self) -> Dict:
@@ -30,6 +31,7 @@ class SimulationResult:
             "strategy": self.strategy_name,
             "metrics": self.metrics.__dict__,
             "total_energy": self.total_energy,
+            "total_distance": self.total_distance,
             "elevators": self.elevator_stats,
             "config": {
                 "num_floors": self.config.num_floors,
@@ -49,6 +51,14 @@ def build_strategy(name: str, config: SimulationConfig) -> Strategy:
         return CollectiveControlStrategy(elevator_cfg, config.num_floors)
     if name == "destination_dispatch":
         return DestinationDispatchStrategy(elevator_cfg, config.num_floors)
+    if name == "zoned_dispatch":
+        from .strategy.zoned import ZonedDispatchStrategy
+
+        return ZonedDispatchStrategy(elevator_cfg, config.num_floors, config.num_elevators)
+    if name == "energy_saver":
+        from .strategy.energy_saver import EnergySaverStrategy
+
+        return EnergySaverStrategy(elevator_cfg, config.num_floors)
     raise ValueError(f"Unknown strategy: {name}")
 
 
@@ -79,13 +89,27 @@ class Simulation:
             for elevator in self.elevators:
                 self._update_elevator(elevator, current_time)
 
-        metrics = compute_metrics(self._passengers_post_warmup(), duration - self.config.warmup_s)
+        warm_duration = max(0.0, duration - self.config.warmup_s)
+        operational_totals = self._aggregate_operational_totals()
+        metrics = compute_metrics(
+            self._passengers_post_warmup(),
+            warm_duration,
+            operational_totals,
+        )
         elevator_stats = [
             {
                 "elevator_id": elevator.elevator_id,
                 "distance_travelled": elevator.total_distance,
                 "stops": elevator.total_stops,
                 "energy": elevator.total_energy,
+                "active_distance": elevator.active_distance,
+                "active_energy": elevator.active_energy,
+                "empty_distance": elevator.empty_distance,
+                "active_empty_distance": elevator.active_empty_distance,
+                "time_idle": elevator.time_idle,
+                "time_moving": elevator.time_moving,
+                "time_boarding": elevator.time_boarding,
+                "occupancy_time": elevator.occupancy_time,
                 "passengers_moved": len(
                     [p for p in self.passengers if p.assigned_elevator == elevator.elevator_id]
                 ),
@@ -93,6 +117,7 @@ class Simulation:
             for elevator in self.elevators
         ]
         total_energy = sum(elevator.total_energy for elevator in self.elevators)
+        total_distance = sum(elevator.total_distance for elevator in self.elevators)
         return SimulationResult(
             strategy_name=self.strategy.name,
             config=self.config,
@@ -100,6 +125,7 @@ class Simulation:
             metrics=metrics,
             elevator_stats=elevator_stats,
             total_energy=total_energy,
+            total_distance=total_distance,
             run_index=self.run_index,
         )
 
@@ -143,6 +169,7 @@ class Simulation:
             self.strategy.on_passenger_arrival(self.elevators, passenger)
 
     def _update_elevator(self, elevator: ElevatorState, current_time: float) -> None:
+        self._record_operational_time(elevator, current_time)
         if elevator.time_to_next_action > 0:
             elevator.time_to_next_action -= self.dt
             if elevator.time_to_next_action > 0:
@@ -154,7 +181,7 @@ class Simulation:
             stop_time = self._handle_floor_stop(elevator, int(elevator.current_floor), current_time)
             elevator.time_to_next_action = stop_time
             elevator.total_stops += 1
-            elevator.total_energy += self.config.elevator.energy_per_stop
+            self._add_energy(elevator, self.config.elevator.energy_per_stop, current_time)
             return
 
         if elevator.mode == ElevatorMode.BOARDING:
@@ -182,7 +209,7 @@ class Simulation:
             stop_time = self._handle_floor_stop(elevator, target_floor, current_time)
             elevator.time_to_next_action = stop_time
             elevator.total_stops += 1
-            elevator.total_energy += self.config.elevator.energy_per_stop
+            self._add_energy(elevator, self.config.elevator.energy_per_stop, current_time)
             return
         distance = abs(target_floor - elevator.current_floor)
         travel_time = distance * self.config.elevator.seconds_per_floor
@@ -190,8 +217,12 @@ class Simulation:
         elevator.mode = ElevatorMode.MOVING
         elevator.target_floor = target_floor
         elevator.direction = 1 if target_floor > elevator.current_floor else -1
-        elevator.total_distance += distance
-        elevator.total_energy += distance * self.config.elevator.energy_per_floor
+        self._record_distance(elevator, distance, current_time)
+        self._add_energy(
+            elevator,
+            distance * self.config.elevator.energy_per_floor,
+            current_time,
+        )
 
     def _move_to_idle_floor(self, elevator: ElevatorState, current_time: float) -> None:
         idle_floors = self.config.elevator.idle_floors
@@ -229,12 +260,59 @@ class Simulation:
     def _passengers_post_warmup(self) -> Iterable[Passenger]:
         warmup = self.config.warmup_s
         if warmup <= 0:
-            return [p for p in self.passengers if not p.metadata.get("discard")] 
+            return [p for p in self.passengers if not p.metadata.get("discard")]
         return [
             p
             for p in self.passengers
             if p.request_time >= warmup and not p.metadata.get("discard")
         ]
+
+    def _record_operational_time(self, elevator: ElevatorState, current_time: float) -> None:
+        if current_time < self.config.warmup_s:
+            return
+        dt = self.dt
+        if elevator.mode == ElevatorMode.IDLE:
+            elevator.time_idle += dt
+        elif elevator.mode == ElevatorMode.MOVING:
+            elevator.time_moving += dt
+        elif elevator.mode == ElevatorMode.BOARDING:
+            elevator.time_boarding += dt
+        elevator.occupancy_time += dt * elevator.occupants()
+
+    def _record_distance(self, elevator: ElevatorState, distance: float, current_time: float) -> None:
+        elevator.total_distance += distance
+        if elevator.occupants() == 0:
+            elevator.empty_distance += distance
+        if current_time < self.config.warmup_s:
+            return
+        elevator.active_distance += distance
+        if elevator.occupants() == 0:
+            elevator.active_empty_distance += distance
+
+    def _add_energy(self, elevator: ElevatorState, energy: float, current_time: float) -> None:
+        elevator.total_energy += energy
+        if current_time < self.config.warmup_s:
+            return
+        elevator.active_energy += energy
+
+    def _aggregate_operational_totals(self) -> Dict[str, float]:
+        total_energy = sum(e.active_energy for e in self.elevators)
+        total_distance = sum(e.active_distance for e in self.elevators)
+        occupancy_time = sum(e.occupancy_time for e in self.elevators)
+        idle_time = sum(e.time_idle for e in self.elevators)
+        moving_time = sum(e.time_moving for e in self.elevators)
+        boarding_time = sum(e.time_boarding for e in self.elevators)
+        empty_distance = sum(e.active_empty_distance for e in self.elevators)
+        return {
+            "total_energy": total_energy,
+            "total_distance": total_distance,
+            "occupancy_time": occupancy_time,
+            "idle_time": idle_time,
+            "moving_time": moving_time,
+            "boarding_time": boarding_time,
+            "empty_distance": empty_distance,
+            "num_elevators": len(self.elevators),
+        }
 
 
 def run_batch(
